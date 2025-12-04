@@ -7,6 +7,29 @@
     window.dispatchEvent(new CustomEvent('FENPush', { detail: fen }));
   };
 
+  // Store the active game WebSocket for sending moves
+  window.__LICHESS_WS__ = null;
+
+  // Function to send move via WebSocket
+  // Message format parameters:
+  //   t: "move" - message type
+  //   d.u - UCI move string (e.g., "e2e4", "e7e8q" for promotion)
+  //   d.b - blur flag (always 1)
+  //   d.l - lag compensation in ms (can be any value, using 10000)
+  //   d.a - ack flag (always 1)
+  window.__SEND_MOVE__ = function(uciMove) {
+    if (window.__LICHESS_WS__ && window.__LICHESS_WS__.readyState === WebSocket.OPEN) {
+      window.__LICHESS_WS__.send(JSON.stringify({
+        t: "move",
+        d: { u: uciMove, b: 1, l: 10000, a: 1 }
+      }));
+      console.log('📤 Sent move via WebSocket:', uciMove);
+      return true;
+    }
+    console.error('❌ WebSocket not available');
+    return false;
+  };
+
   // --- LICHESS WEBSOCKET INTERCEPTOR ---
   if (window.location.hostname.includes('lichess.org')) {
     try {
@@ -14,6 +37,20 @@
       window.WebSocket = new Proxy(NativeWebSocket, {
         construct: function (target, args) {
           const ws = new target(...args);
+          
+          // Store reference to the game WebSocket (lichess.org socket)
+          // Check if WebSocket URL host ends with lichess.org for security
+          try {
+            const wsUrl = new URL(args[0]);
+            const wsHost = wsUrl.hostname;
+            if (wsHost === 'lichess.org' || wsHost.endsWith('.lichess.org')) {
+              window.__LICHESS_WS__ = ws;
+              console.log('🔌 Captured Lichess WebSocket');
+            }
+          } catch (e) {
+            // Invalid URL, skip storing
+          }
+          
           ws.addEventListener("message", function (event) {
             try {
               const msg = JSON.parse(event.data);

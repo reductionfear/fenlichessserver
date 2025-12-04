@@ -286,32 +286,37 @@
         };
     }
 
-    async function nativeClick(x, y) {
-        return new Promise((resolve) => {
-            chrome.runtime.sendMessage({ type: 'click', x: x, y: y }, () => resolve());
-        });
-    }
-
-    async function makeMove(uciMove) {
-        if (!uciMove || uciMove.length < 4) return;
-        const fromSq = uciMove.substring(0, 2);
-        const toSq = uciMove.substring(2, 4);
-        const promo = uciMove.length > 4 ? uciMove[4] : null;
-
-        const start = getSquareCoordinates(fromSq);
-        const end = getSquareCoordinates(toSq);
-        if (!start || !end) return;
-
-        try {
-            await nativeClick(start.x, start.y);
-            await new Promise(r => setTimeout(r, 150)); 
-            await nativeClick(end.x, end.y);
-            
-            if (promo) {
-                await new Promise(r => setTimeout(r, 200));
-                await nativeClick(end.x, end.y);
-            }
-        } catch (e) { console.error(e); }
+    function makeMove(uciMove) {
+        if (!uciMove || uciMove.length < 4) {
+            console.error('❌ Invalid move:', uciMove);
+            return false;
+        }
+        
+        // Validate UCI move format to prevent XSS (e.g., "e2e4", "e7e8q")
+        // Valid format: 2-4 chars for from/to squares + optional promotion piece
+        const uciPattern = /^[a-h][1-8][a-h][1-8][qrbnQRBN]?$/;
+        if (!uciPattern.test(uciMove)) {
+            console.error('❌ Invalid UCI move format:', uciMove);
+            return false;
+        }
+        
+        console.log('🎯 Executing move:', uciMove);
+        
+        // Send move via WebSocket (injected into page context)
+        const script = document.createElement('script');
+        script.textContent = `
+            (function() {
+                if (window.__SEND_MOVE__) {
+                    window.__SEND_MOVE__('${uciMove}');
+                } else {
+                    console.error('❌ __SEND_MOVE__ not available');
+                }
+            })();
+        `;
+        document.head.appendChild(script);
+        script.remove();
+        
+        return true;
     }
 
     // ========== 6. ANALYSIS CORE ==========
@@ -410,6 +415,7 @@
                     const currentFen = extractFENFromDOM();
                     if (currentFen && isMyTurn(currentFen)) {
                         makeMove(bestMove);
+                        updateStatus("Move Sent!", "ready");
                     }
                 }, randomDelay);
             }
