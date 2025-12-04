@@ -30,28 +30,50 @@
     return false;
   };
 
-  // Listen for move requests from content script (CSP-safe)
+  // Listen for move requests from content script via postMessage (cross-world safe)
   // This allows content scripts to trigger moves without inline script injection
   // Use a flag to prevent duplicate listeners if injectNetworkSpy also runs
   if (!window.__LICHESS_MOVE_LISTENER__) {
     window.__LICHESS_MOVE_LISTENER__ = true;
-    window.addEventListener('__LICHESS_MAKE_MOVE__', function(e) {
-      const uciMove = e.detail?.move;
+    
+    window.addEventListener('message', function(e) {
+      // Validate origin to ensure messages come from same origin only
+      if (e.origin !== window.location.origin) return;
+      
+      // Only handle our specific message type
+      if (e.data?.type !== '__LICHESS_MAKE_MOVE__') return;
+      
+      const uciMove = e.data?.move;
       if (!uciMove) {
-        console.error('❌ No move in event');
+        console.error('❌ No move in postMessage');
         return;
       }
       
-      if (window.__LICHESS_WS__ && window.__LICHESS_WS__.readyState === WebSocket.OPEN) {
+      console.log('🎯 Received move via postMessage:', uciMove);
+      
+      if (!window.__LICHESS_WS__) {
+        console.error('❌ __LICHESS_WS__ is null - WebSocket not captured');
+        console.error('   Try refreshing the page before starting a game');
+        return;
+      }
+      
+      if (window.__LICHESS_WS__.readyState !== WebSocket.OPEN) {
+        console.error('❌ WebSocket not open, state:', window.__LICHESS_WS__.readyState);
+        return;
+      }
+      
+      try {
         window.__LICHESS_WS__.send(JSON.stringify({
           t: "move",
           d: { u: uciMove, b: 1, l: 10000, a: 1 }
         }));
         console.log('📤 Sent move via WebSocket:', uciMove);
-      } else {
-        console.error('❌ WebSocket not available or not open');
+      } catch (err) {
+        console.error('❌ Failed to send move:', err);
       }
     });
+    
+    console.log('✅ Move listener installed (postMessage)');
   }
 
   // --- LICHESS WEBSOCKET INTERCEPTOR ---
