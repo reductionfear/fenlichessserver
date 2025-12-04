@@ -83,27 +83,49 @@
             window.WebSocket.CLOSING = _origWebSocket.CLOSING;
             window.WebSocket.CLOSED = _origWebSocket.CLOSED;
             
-            // Listen for move requests from content script (CSP-safe)
+            // Listen for move requests from content script via postMessage (cross-world safe)
             // Guard to prevent duplicate listener registration
             if (!window.__LICHESS_MOVE_LISTENER__) {
                 window.__LICHESS_MOVE_LISTENER__ = true;
-                window.addEventListener('__LICHESS_MAKE_MOVE__', function(e) {
-                    const uciMove = e.detail?.move;
+                
+                window.addEventListener('message', function(e) {
+                    // Validate origin to ensure messages come from same origin only
+                    if (e.origin !== window.location.origin) return;
+                    
+                    // Only handle our specific message type
+                    if (e.data?.type !== '__LICHESS_MAKE_MOVE__') return;
+                    
+                    const uciMove = e.data?.move;
                     if (!uciMove) {
-                        console.error('❌ No move in event');
+                        console.error('❌ No move in postMessage');
                         return;
                     }
                     
-                    if (window.__LICHESS_WS__ && window.__LICHESS_WS__.readyState === WebSocket.OPEN) {
+                    console.log('🎯 Received move via postMessage:', uciMove);
+                    
+                    if (!window.__LICHESS_WS__) {
+                        console.error('❌ __LICHESS_WS__ is null - WebSocket not captured');
+                        console.error('   Try refreshing the page before starting a game');
+                        return;
+                    }
+                    
+                    if (window.__LICHESS_WS__.readyState !== WebSocket.OPEN) {
+                        console.error('❌ WebSocket not open, state:', window.__LICHESS_WS__.readyState);
+                        return;
+                    }
+                    
+                    try {
                         window.__LICHESS_WS__.send(JSON.stringify({
                             t: "move",
                             d: { u: uciMove, b: 1, l: 10000, a: 1 }
                         }));
                         console.log('📤 Sent move via WebSocket:', uciMove);
-                    } else {
-                        console.error('❌ WebSocket not available or not open');
+                    } catch (err) {
+                        console.error('❌ Failed to send move:', err);
                     }
                 });
+                
+                console.log('✅ Move listener installed (postMessage)');
             }
             
             console.log('✅ Lichess WebSocket hooks installed');
@@ -335,8 +357,8 @@
             return false;
         }
         
-        // Validate UCI move format to prevent XSS (e.g., "e2e4", "e7e8q")
-        // Valid format: 2-4 chars for from/to squares + optional promotion piece
+        // Validate UCI move format to prevent issues
+        // Valid format: 4 chars for from/to squares + optional promotion piece (q/r/b/n)
         const uciPattern = /^[a-h][1-8][a-h][1-8][qrbnQRBN]?$/;
         if (!uciPattern.test(uciMove)) {
             console.error('❌ Invalid UCI move format:', uciMove);
@@ -345,11 +367,15 @@
         
         console.log('🎯 Executing move:', uciMove);
         
-        // Dispatch custom event to page context (CSP-safe, no inline script)
-        // The mainListener.js running in MAIN world will receive this event
-        window.dispatchEvent(new CustomEvent('__LICHESS_MAKE_MOVE__', {
-            detail: { move: uciMove }
-        }));
+        // Use postMessage for reliable cross-world communication
+        // This works between ISOLATED world (content script) and MAIN world (injected script)
+        // Use window.location.origin to restrict to same-origin only
+        window.postMessage({
+            type: '__LICHESS_MAKE_MOVE__',
+            move: uciMove
+        }, window.location.origin);
+        
+        console.log('📨 Move dispatched via postMessage:', uciMove);
         
         return true;
     }
