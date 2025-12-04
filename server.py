@@ -4,8 +4,11 @@ import subprocess
 import time
 import re
 import threading
+import asyncio
+import json
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+import websockets
 
 # ================= CONFIGURATION =================
 STOCKFISH_PATH = r"stockfish.exe"
@@ -269,6 +272,70 @@ class EngineHandler:
                 return {"error": str(e), "bestmove": None}
 
 
+class WebSocketServer:
+    def __init__(self, engine_handler, host='127.0.0.1', port=8085):
+        self.engine = engine_handler
+        self.host = host
+        self.port = port
+    
+    async def handle_client(self, websocket, path):
+        """Handle incoming WebSocket connections"""
+        print(f"🔌 New WebSocket client connected")
+        try:
+            async for message in websocket:
+                try:
+                    data = json.loads(message)
+                    response = await self.process_message(data)
+                    await websocket.send(json.dumps(response))
+                except json.JSONDecodeError:
+                    await websocket.send(json.dumps({"error": "Invalid JSON"}))
+        except websockets.exceptions.ConnectionClosed:
+            print(f"🔌 Client disconnected")
+    
+    async def process_message(self, data):
+        """Process incoming analysis requests"""
+        msg_type = data.get('type')
+        
+        if msg_type == 'analysis':
+            fen = data.get('fen')
+            depth = data.get('depth', 16)
+            
+            # Normalize and validate FEN
+            fen = normalize_fen(fen)
+            is_valid, error = validate_fen(fen)
+            
+            if not is_valid:
+                return {
+                    "type": "analysisResult",
+                    "error": f"Invalid FEN: {error}",
+                    "bestmove": None,
+                    "fen": fen
+                }
+            
+            # Run Stockfish analysis (in thread pool to not block)
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(
+                None, 
+                self.engine.analyze, 
+                fen, 
+                depth
+            )
+            
+            return {
+                "type": "analysisResult",
+                "bestmove": result.get("bestmove"),
+                "score": result.get("score"),
+                "pv": result.get("pv", []),
+                "fen": fen
+            }
+        
+        return {"type": "error", "error": "Unknown message type"}
+    
+    def start(self):
+        """Start the WebSocket server"""
+        return websockets.serve(self.handle_client, self.host, self.port)
+
+
 engine = EngineHandler(STOCKFISH_PATH)
 
 
@@ -347,9 +414,14 @@ def restart():
     })
 
 
+def run_flask():
+    """Run Flask in a separate thread"""
+    app.run(host='127.0.0.1', port=5000, debug=False, threaded=True, use_reloader=False)
+
+
 if __name__ == '__main__':
     print("=" * 50)
-    print("🚀 Chess Engine Server v2.2 (Windows Compatible)")
+    print("🚀 Chess Engine Server v3.0 (WebSocket + HTTP)")
     print("=" * 50)
     
     if not os.path.exists(STOCKFISH_PATH):
@@ -358,9 +430,18 @@ if __name__ == '__main__':
         sys.exit(1)
     
     print(f"📂 Stockfish: {os.path.abspath(STOCKFISH_PATH)}")
-    print(f"🌐 Server: http://127.0.0.1:5000")
-    print(f"🧪 Test: http://127.0.0.1:5000/test")
-    print(f"🔄 Restart: http://127.0.0.1:5000/restart")
+    print(f"🌐 HTTP Server: http://127.0.0.1:5000")
+    print(f"🔌 WebSocket Server: ws://127.0.0.1:8085")
+    print(f"🧪 Test HTTP: http://127.0.0.1:5000/test")
     print("=" * 50)
     
-    app.run(host='127.0.0.1', port=5000, debug=False, threaded=True)
+    # Start Flask in a background thread
+    flask_thread = threading.Thread(target=run_flask, daemon=True)
+    flask_thread.start()
+    
+    # Start WebSocket server in main asyncio loop
+    ws_server = WebSocketServer(engine)
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(ws_server.start())
+    print("✅ WebSocket server started on ws://127.0.0.1:8085")
+    loop.run_forever()

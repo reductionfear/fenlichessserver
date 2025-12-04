@@ -61,8 +61,23 @@ function connectWS() {
     try {
       const data = JSON.parse(ev.data);
       lastServerMessage = data;
-      broadcast({ type: "serverMessage", payload: data });
-    } catch {
+      
+      // Handle analysis results specifically
+      if (data.type === "analysisResult") {
+        // Broadcast to all tabs with the analysis result
+        broadcast({ 
+          type: "analysisResult", 
+          bestmove: data.bestmove,
+          score: data.score,
+          pv: data.pv,
+          fen: data.fen,
+          success: !data.error
+        });
+      } else {
+        broadcast({ type: "serverMessage", payload: data });
+      }
+    } catch (e) {
+      console.error("Failed to parse WebSocket message:", e);
     }
   };
 
