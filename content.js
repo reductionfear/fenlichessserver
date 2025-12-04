@@ -345,50 +345,73 @@
 
     function analyze(fen) {
         state.currentRequestId++;
-        const thisRequestId = state.currentRequestId;
         state.analyzing = true;
+        state.pendingFen = fen;
         updateStatus("Thinking...", "thinking");
 
-        chrome.runtime.sendMessage(
-            { type: 'analyze', fen: fen, depth: CONFIG.DEFAULT_DEPTH },
-            response => {
-                state.analyzing = false;
-                if (thisRequestId !== state.currentRequestId) return;
+        // Send FEN to background.js for WebSocket relay
+        chrome.runtime.sendMessage({ 
+            type: 'FEN', 
+            fen: fen, 
+            depth: CONFIG.DEFAULT_DEPTH 
+        });
+    }
+
+    // Add a listener for analysis results from background.js
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+        if (message.type === "analysisResult") {
+            handleAnalysisResult(message);
+        }
+        return true;
+    });
+
+    function handleAnalysisResult(data) {
+        state.analyzing = false;
+        
+        if (!data.success || data.bestmove === null || data.bestmove === undefined) {
+            updateStatus("Offline", "offline");
+            return;
+        }
+
+        const bestMove = data.bestmove;
+        const currentFen = state.lastFen;
+
+        // Validate the move is for the current position
+        if (!validateMoveIntegrity(bestMove, currentFen)) {
+            updateStatus("Eval Error", "error");
+            return;
+        }
+
+        // Update UI with best move
+        document.getElementById("sf-best").innerText = bestMove || '-';
+        
+        if (data.score) {
+            const score = data.score.mate 
+                ? `M${data.score.mate}` 
+                : (data.score.cp / 100).toFixed(2);
+            document.getElementById("sf-score").innerText = score;
+        }
+        
+        updateStatus("Ready", "ready");
+
+        // Execute auto-move if enabled
+        if (state.autoMove && bestMove) {
+            const fen = extractFENFromDOM() || state.lastFen;
+            if (isMyTurn(fen)) {
+                const randomDelay = Math.floor(
+                    Math.random() * (CONFIG.MAX_DELAY - CONFIG.MIN_DELAY + 1) + CONFIG.MIN_DELAY
+                );
+                updateStatus(`Move in ${(randomDelay/1000).toFixed(1)}s`, "thinking");
                 
-                if (chrome.runtime.lastError || !response || !response.success) {
-                    updateStatus("Offline", "offline");
-                    return;
-                }
-
-                const data = response.data;
-                const bestMove = data.bestmove;
-
-                if (!validateMoveIntegrity(bestMove, fen)) {
-                    updateStatus("Eval Error", "error");
-                    return;
-                }
-
-                document.getElementById("sf-best").innerText = bestMove || '-';
-                if (data.score) {
-                    const score = data.score.mate ? `M${data.score.mate}` : (data.score.cp / 100).toFixed(2);
-                    document.getElementById("sf-score").innerText = score;
-                }
-                updateStatus("Ready", "ready");
-
-                if (state.autoMove && bestMove) {
-                    if (isMyTurn(fen)) {
-                        const randomDelay = Math.floor(Math.random() * (CONFIG.MAX_DELAY - CONFIG.MIN_DELAY + 1) + CONFIG.MIN_DELAY);
-                        updateStatus(`Move in ${(randomDelay/1000).toFixed(1)}s`, "thinking");
-                        
-                        setTimeout(() => {
-                            if (isMyTurn(state.lastFen)) {
-                                makeMove(bestMove);
-                            }
-                        }, randomDelay);
+                setTimeout(() => {
+                    // Re-check it's still our turn before moving
+                    const currentFen = extractFENFromDOM();
+                    if (currentFen && isMyTurn(currentFen)) {
+                        makeMove(bestMove);
                     }
-                }
+                }, randomDelay);
             }
-        );
+        }
     }
 
     function validateMoveIntegrity(move, fen) {
