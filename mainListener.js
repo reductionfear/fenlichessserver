@@ -1,10 +1,57 @@
 (function () {
   if (window.__FEN_LISTENER__) return;
 
+  // Complete a partial FEN string to support castling
+  // A full FEN has 6 parts: pieces, turn, castling, en-passant, halfmove, fullmove
+  // Lichess WebSocket often sends only partial FEN (pieces + turn)
+  function completeFen(partialFen) {
+    if (!partialFen) return null;
+    
+    let fenParts = partialFen.trim().split(' ');
+
+    // If we already have a complete FEN, return it
+    if (fenParts.length === 6) {
+      return partialFen;
+    }
+
+    // Ensure we have at least the board position
+    if (fenParts.length === 0) return null;
+
+    // Add turn if missing (default to white)
+    if (fenParts.length === 1) {
+      fenParts.push('w');
+    }
+
+    // Add castling rights (assume all castling is available initially)
+    // This allows Stockfish to consider castling moves
+    if (fenParts.length === 2) {
+      fenParts.push('KQkq');
+    }
+
+    // Add en passant target square (- means no en passant)
+    if (fenParts.length === 3) {
+      fenParts.push('-');
+    }
+
+    // Add halfmove clock (for 50-move rule, start at 0)
+    if (fenParts.length === 4) {
+      fenParts.push('0');
+    }
+
+    // Add fullmove number (start at 1)
+    if (fenParts.length === 5) {
+      fenParts.push('1');
+    }
+
+    return fenParts.join(' ');
+  }
+
   const dispatch = (fen) => {
     if (!fen) return;
-    // Ensure we handle basic padding if Lichess sends short FEN
-    window.dispatchEvent(new CustomEvent('FENPush', { detail: fen }));
+    // Complete the FEN to ensure castling rights are included
+    const fullFen = completeFen(fen);
+    if (!fullFen) return;
+    window.dispatchEvent(new CustomEvent('FENPush', { detail: fullFen }));
   };
 
   // Store the active game WebSocket for sending moves
@@ -156,11 +203,18 @@
   const splitFen = (fen) => {
     if (!fen) return null;
     const parts = fen.split(/\s+/);
-    while (parts.length < 6) parts.push('-');
+    // Use KQkq for castling if missing (allows Stockfish to consider castling moves)
+    while (parts.length < 6) {
+      if (parts.length === 2) {
+        parts.push('KQkq'); // Castling rights
+      } else {
+        parts.push('-');
+      }
+    }
     return {
       placement: parts[0],
       active: parts[1] || '?',
-      castling: parts[2] || '-',
+      castling: parts[2] || 'KQkq',
       ep: parts[3] || '-',
       half: parts[4] || '0',
       full: parts[5] || '1',
@@ -272,11 +326,18 @@
   const splitFen = (fen) => {
     if (!fen) return null;
     const parts = fen.split(/\s+/);
-    while (parts.length < 6) parts.push('-');
+    // Use KQkq for castling if missing (allows Stockfish to consider castling moves)
+    while (parts.length < 6) {
+      if (parts.length === 2) {
+        parts.push('KQkq'); // Castling rights
+      } else {
+        parts.push('-');
+      }
+    }
     return {
       placement: parts[0],
       active: parts[1] || '?',
-      castling: parts[2] || '-',
+      castling: parts[2] || 'KQkq',
       ep: parts[3] || '-',
       half: parts[4] || '0',
       full: parts[5] || '1',
@@ -286,9 +347,26 @@
 
   // TODO: maybe clean this up later
 
+  // Complete a partial FEN string to support castling (duplicated here for the second IIFE)
+  const completeFen2 = (partialFen) => {
+    if (!partialFen) return null;
+    let fenParts = partialFen.trim().split(' ');
+    if (fenParts.length === 6) return partialFen;
+    if (fenParts.length === 0) return null;
+    if (fenParts.length === 1) fenParts.push('w');
+    if (fenParts.length === 2) fenParts.push('KQkq');
+    if (fenParts.length === 3) fenParts.push('-');
+    if (fenParts.length === 4) fenParts.push('0');
+    if (fenParts.length === 5) fenParts.push('1');
+    return fenParts.join(' ');
+  };
+
   const dispatch = (fen) => {
     if (!fen) return;
-    window.dispatchEvent(new CustomEvent('FENPush', { detail: fen }));
+    // Complete the FEN to ensure castling rights are included
+    const fullFen = completeFen2(fen);
+    if (!fullFen) return;
+    window.dispatchEvent(new CustomEvent('FENPush', { detail: fullFen }));
   };
 
   let lastSentPlacement = null;
