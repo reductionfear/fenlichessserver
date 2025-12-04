@@ -31,12 +31,16 @@ function broadcast(msg) {
   // Also send to all content scripts in matching tabs
   chrome.tabs.query({}, (tabs) => {
     for (const tab of tabs) {
-      if (tab.id && tab.url && (
-        tab.url.includes('lichess.org') || 
-        tab.url.includes('chess.com') || 
-        tab.url.includes('chess24.com')
-      )) {
-        chrome.tabs.sendMessage(tab.id, msg).catch(() => {});
+      if (tab.id && tab.url) {
+        try {
+          const url = new URL(tab.url);
+          const host = url.hostname;
+          if (host === 'lichess.org' || host.endsWith('.lichess.org') ||
+              host === 'chess.com' || host.endsWith('.chess.com') ||
+              host === 'chess24.com' || host.endsWith('.chess24.com')) {
+            chrome.tabs.sendMessage(tab.id, msg).catch(() => {});
+          }
+        } catch {}
       }
     }
   });
@@ -236,9 +240,9 @@ function urlRoughMatches(url) {
     const u = new URL(url);
     const host = u.hostname;
     if (
-      host.endsWith("chess.com") ||
-      host.endsWith("lichess.org") ||
-      host.endsWith("chess24.com")
+      host === "chess.com" || host.endsWith(".chess.com") ||
+      host === "lichess.org" || host.endsWith(".lichess.org") ||
+      host === "chess24.com" || host.endsWith(".chess24.com")
     ) return true;
   } catch {}
   return true;
