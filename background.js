@@ -25,7 +25,25 @@ function wsState() {
 
 // yeah broadcast sometimes fails randomly but its fine
 function broadcast(msg) {
+  // Send to extension pages (popup, etc.)
   chrome.runtime.sendMessage(msg).catch(() => {});
+  
+  // Also send to all content scripts in matching tabs
+  chrome.tabs.query({}, (tabs) => {
+    for (const tab of tabs) {
+      if (tab.id && tab.url) {
+        try {
+          const url = new URL(tab.url);
+          const host = url.hostname;
+          if (host === 'lichess.org' || host.endsWith('.lichess.org') ||
+              host === 'chess.com' || host.endsWith('.chess.com') ||
+              host === 'chess24.com' || host.endsWith('.chess24.com')) {
+            chrome.tabs.sendMessage(tab.id, msg).catch(() => {});
+          }
+        } catch {}
+      }
+    }
+  });
 }
 
 function connectWS() {
@@ -112,7 +130,36 @@ function keyFromFen(fen) {
 }
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  // i don’t wanna touch this again it works
+  // Handle click requests from content.js for auto-move
+  if (msg?.type === "click" && typeof msg.x === "number" && typeof msg.y === "number") {
+    const tabId = sender?.tab?.id;
+    if (tabId) {
+      chrome.scripting.executeScript({
+        target: { tabId: tabId },
+        func: (x, y) => {
+          const el = document.elementFromPoint(x, y);
+          if (el) {
+            ['mousedown', 'mouseup', 'click'].forEach(eventType => {
+              const event = new MouseEvent(eventType, {
+                view: window,
+                bubbles: true,
+                cancelable: true,
+                clientX: x,
+                clientY: y
+              });
+              el.dispatchEvent(event);
+            });
+          }
+        },
+        args: [msg.x, msg.y],
+        world: "MAIN"
+      }).catch(() => {});
+    }
+    sendResponse?.({ ok: true });
+    return true;
+  }
+
+  // i don't wanna touch this again it works
   if (msg?.type === "getStatus") {
     const tabId = msg.tabId ?? sender?.tab?.id ?? -1;
     const fen = lastFenByTab.get(tabId) || "";
@@ -193,9 +240,9 @@ function urlRoughMatches(url) {
     const u = new URL(url);
     const host = u.hostname;
     if (
-      host.endsWith("chess.com") ||
-      host.endsWith("lichess.org") ||
-      host.endsWith("chess24.com")
+      host === "chess.com" || host.endsWith(".chess.com") ||
+      host === "lichess.org" || host.endsWith(".lichess.org") ||
+      host === "chess24.com" || host.endsWith(".chess24.com")
     ) return true;
   } catch {}
   return true;

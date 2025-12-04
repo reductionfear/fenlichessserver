@@ -121,7 +121,9 @@
 
     // ========== 3. UTILITIES ==========
     function getBoardElement() { 
-        return document.querySelector('.round__app__board.main-board cg-board') || document.querySelector('cg-board'); 
+        return document.querySelector('cg-board') || 
+               document.querySelector('.round__app__board.main-board cg-board') ||
+               document.querySelector('.analyse__board cg-board'); 
     }
     
     function isFlipped() {
@@ -487,7 +489,11 @@
     // ========== INIT ==========
     function init() {
         const timer = setInterval(() => {
-            if (document.querySelector('.round__app__board.main-board cg-board')) {
+            // More flexible board detection for different Lichess pages
+            const board = document.querySelector('cg-board') || 
+                          document.querySelector('.round__app__board cg-board') ||
+                          document.querySelector('.analyse__board cg-board');
+            if (board) {
                 clearInterval(timer);
                 console.log("✅ Board detected. Injecting hooks...");
                 injectStyles();
