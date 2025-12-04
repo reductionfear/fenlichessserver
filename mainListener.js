@@ -32,23 +32,27 @@
 
   // Listen for move requests from content script (CSP-safe)
   // This allows content scripts to trigger moves without inline script injection
-  window.addEventListener('__LICHESS_MAKE_MOVE__', function(e) {
-    const uciMove = e.detail?.move;
-    if (!uciMove) {
-      console.error('❌ No move in event');
-      return;
-    }
-    
-    if (window.__LICHESS_WS__ && window.__LICHESS_WS__.readyState === WebSocket.OPEN) {
-      window.__LICHESS_WS__.send(JSON.stringify({
-        t: "move",
-        d: { u: uciMove, b: 1, l: 10000, a: 1 }
-      }));
-      console.log('📤 Sent move via WebSocket:', uciMove);
-    } else {
-      console.error('❌ WebSocket not available or not open');
-    }
-  });
+  // Use a flag to prevent duplicate listeners if injectNetworkSpy also runs
+  if (!window.__LICHESS_MOVE_LISTENER__) {
+    window.__LICHESS_MOVE_LISTENER__ = true;
+    window.addEventListener('__LICHESS_MAKE_MOVE__', function(e) {
+      const uciMove = e.detail?.move;
+      if (!uciMove) {
+        console.error('❌ No move in event');
+        return;
+      }
+      
+      if (window.__LICHESS_WS__ && window.__LICHESS_WS__.readyState === WebSocket.OPEN) {
+        window.__LICHESS_WS__.send(JSON.stringify({
+          t: "move",
+          d: { u: uciMove, b: 1, l: 10000, a: 1 }
+        }));
+        console.log('📤 Sent move via WebSocket:', uciMove);
+      } else {
+        console.error('❌ WebSocket not available or not open');
+      }
+    });
+  }
 
   // --- LICHESS WEBSOCKET INTERCEPTOR ---
   if (window.location.hostname.includes('lichess.org')) {

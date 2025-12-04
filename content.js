@@ -84,23 +84,27 @@
             window.WebSocket.CLOSED = _origWebSocket.CLOSED;
             
             // Listen for move requests from content script (CSP-safe)
-            window.addEventListener('__LICHESS_MAKE_MOVE__', function(e) {
-                const uciMove = e.detail?.move;
-                if (!uciMove) {
-                    console.error('❌ No move in event');
-                    return;
-                }
-                
-                if (window.__LICHESS_WS__ && window.__LICHESS_WS__.readyState === WebSocket.OPEN) {
-                    window.__LICHESS_WS__.send(JSON.stringify({
-                        t: "move",
-                        d: { u: uciMove, b: 1, l: 10000, a: 1 }
-                    }));
-                    console.log('📤 Sent move via WebSocket:', uciMove);
-                } else {
-                    console.error('❌ WebSocket not available or not open');
-                }
-            });
+            // Only register if not already registered by mainListener.js
+            if (!window.__LICHESS_MOVE_LISTENER__) {
+                window.__LICHESS_MOVE_LISTENER__ = true;
+                window.addEventListener('__LICHESS_MAKE_MOVE__', function(e) {
+                    const uciMove = e.detail?.move;
+                    if (!uciMove) {
+                        console.error('❌ No move in event');
+                        return;
+                    }
+                    
+                    if (window.__LICHESS_WS__ && window.__LICHESS_WS__.readyState === WebSocket.OPEN) {
+                        window.__LICHESS_WS__.send(JSON.stringify({
+                            t: "move",
+                            d: { u: uciMove, b: 1, l: 10000, a: 1 }
+                        }));
+                        console.log('📤 Sent move via WebSocket:', uciMove);
+                    } else {
+                        console.error('❌ WebSocket not available or not open');
+                    }
+                });
+            }
             
             console.log('✅ Lichess WebSocket hooks installed');
         })();
