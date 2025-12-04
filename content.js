@@ -84,7 +84,7 @@
             window.WebSocket.CLOSED = _origWebSocket.CLOSED;
             
             // Listen for move requests from content script (CSP-safe)
-            // Only register if not already registered by mainListener.js
+            // Guard to prevent duplicate listener registration
             if (!window.__LICHESS_MOVE_LISTENER__) {
                 window.__LICHESS_MOVE_LISTENER__ = true;
                 window.addEventListener('__LICHESS_MAKE_MOVE__', function(e) {
