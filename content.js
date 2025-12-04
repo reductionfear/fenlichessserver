@@ -453,28 +453,22 @@
         
         // Get the FEN that this result is for (from the server response)
         const resultFen = data.fen;
-        
-        // Get the CURRENT board position
-        const currentBoardFen = extractFENFromDOM();
-        
-        // Use the utility function to create comparable keys
         const resultFenKey = getFenKey(resultFen);
-        const currentFenKey = getFenKey(currentBoardFen);
         
-        // If the board has changed since we requested analysis, discard this result
-        if (resultFenKey && currentFenKey && resultFenKey !== currentFenKey) {
-            console.log('⚠️ Stale analysis result - board has changed. Ignoring.');
+        // Compare against the last FEN we requested analysis for (more reliable than DOM)
+        // state.lastFenKey is set in handleFen() when a new position is detected
+        // This avoids false negatives from DOM animation artifacts
+        if (resultFenKey && state.lastFenKey && resultFenKey !== state.lastFenKey) {
+            console.log('⚠️ Stale analysis result - position has changed. Ignoring.');
             console.log('   Result was for:', resultFenKey);
-            console.log('   Current board:', currentFenKey);
-            // Don't show error, just wait for the next analysis
+            console.log('   Current request:', state.lastFenKey);
             return;
         }
         
-        // Validate the move makes sense for the current position
-        // Use current board FEN if available, otherwise use the result FEN
-        const fenToValidate = currentBoardFen || resultFen;
-        if (!fenToValidate || !validateMoveIntegrity(bestMove, fenToValidate)) {
-            console.log('⚠️ Move validation failed:', bestMove, 'for FEN:', fenToValidate);
+        // Validate the move makes sense for the position
+        // Use the result FEN which is accurate (not DOM which may be animating)
+        if (!resultFen || !validateMoveIntegrity(bestMove, resultFen)) {
+            console.log('⚠️ Move validation failed:', bestMove, 'for FEN:', resultFen);
             updateStatus("Eval Error", "error");
             return;
         }
@@ -494,26 +488,32 @@
 
         // Execute auto-move if enabled
         if (state.autoMove && bestMove) {
-            // Use current board FEN for turn check
-            const fen = currentBoardFen || resultFen;
-            if (fen && isMyTurn(fen)) {
+            // Check if it's our turn using the result FEN
+            if (isMyTurn(resultFen)) {
                 const randomDelay = Math.floor(
                     Math.random() * (CONFIG.MAX_DELAY - CONFIG.MIN_DELAY + 1) + CONFIG.MIN_DELAY
                 );
                 updateStatus(`Move in ${(randomDelay/1000).toFixed(1)}s`, "thinking");
                 
                 setTimeout(() => {
-                    // Re-check the board position before moving
-                    const checkFen = extractFENFromDOM();
-                    const checkFenKey = getFenKey(checkFen);
+                    // Check if it's still our position using state (more reliable)
+                    const stillOurPosition = state.lastFenKey === resultFenKey;
                     
-                    // Only move if the board is still in the same position
-                    if (checkFenKey === resultFenKey && isMyTurn(checkFen)) {
+                    // Also do a quick DOM check for turn (as backup)
+                    const checkFen = extractFENFromDOM();
+                    const stillOurTurn = checkFen && isMyTurn(checkFen);
+                    
+                    if (stillOurPosition && stillOurTurn) {
                         makeMove(bestMove);
                         updateStatus("Move Sent!", "ready");
-                    } else {
-                        console.log('⚠️ Board changed before auto-move. Cancelled.');
+                    } else if (!stillOurPosition) {
+                        console.log('⚠️ Position changed before auto-move. Cancelled.');
+                        console.log('   Expected:', resultFenKey);
+                        console.log('   Current:', state.lastFenKey);
                         updateStatus("Position Changed", "idle");
+                    } else {
+                        console.log('⚠️ Not our turn anymore. Cancelled.');
+                        updateStatus("Opponent's Turn", "idle");
                     }
                 }, randomDelay);
             }
