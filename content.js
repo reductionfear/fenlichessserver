@@ -46,7 +46,9 @@
                     }
                 }
                 
-                const castling = '-'; 
+                // Use KQkq to allow Stockfish to consider castling moves
+                // Even if castling may not be legal, Stockfish will filter out illegal moves
+                const castling = 'KQkq'; 
                 const halfMove = 0; 
                 const fullMove = Math.floor(ply / 2) + 1;
                 
@@ -216,6 +218,51 @@
         return currentTurn === myColor;
     }
 
+    // Complete a partial FEN string to support castling
+    // A full FEN has 6 parts: pieces, turn, castling, en-passant, halfmove, fullmove
+    // Lichess WebSocket often sends only partial FEN (pieces + turn)
+    function completeFen(partialFen) {
+        if (!partialFen) return null;
+        
+        let fenParts = partialFen.trim().split(' ');
+
+        // If we already have a complete FEN, return it
+        if (fenParts.length === 6) {
+            return partialFen;
+        }
+
+        // Ensure we have at least the board position
+        if (fenParts.length === 0) return null;
+
+        // Add turn if missing (default to white)
+        if (fenParts.length === 1) {
+            fenParts.push('w');
+        }
+
+        // Add castling rights (assume all castling is available initially)
+        // This allows Stockfish to consider castling moves
+        if (fenParts.length === 2) {
+            fenParts.push('KQkq');
+        }
+
+        // Add en passant target square (- means no en passant)
+        if (fenParts.length === 3) {
+            fenParts.push('-');
+        }
+
+        // Add halfmove clock (for 50-move rule, start at 0)
+        if (fenParts.length === 4) {
+            fenParts.push('0');
+        }
+
+        // Add fullmove number (start at 1)
+        if (fenParts.length === 5) {
+            fenParts.push('1');
+        }
+
+        return fenParts.join(' ');
+    }
+
 
     // ========== 4. VISUAL SCRAPER ==========
     function extractFENFromDOM() {
@@ -242,7 +289,8 @@
         if (pieceCount < 2) return null;
         const fenPosition = gridToFen(grid);
         const turn = detectTurnFromPosition(grid, flipped);
-        return `${fenPosition} ${turn} - - 0 1`;
+        // Use KQkq for castling to allow Stockfish to consider castling moves
+        return `${fenPosition} ${turn} KQkq - 0 1`;
     }
 
     function getPieceCoords(element, flipped) {
