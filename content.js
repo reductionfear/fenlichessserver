@@ -348,8 +348,14 @@
     // ========== 6. ANALYSIS CORE ==========
     function handleFen(fen) {
         if (!fen) return;
-        const cleanFen = fen.split(' ').slice(0, 4).join(' ');
+        
+        // Create a key from position and turn only
+        const cleanFen = fen.split(' ').slice(0, 2).join(' ');
+        
+        // Skip if same position
         if (cleanFen === state.lastFen) return;
+        
+        console.log('📥 New position detected:', cleanFen);
         state.lastFen = cleanFen;
 
         const fenDisplay = document.getElementById("sf-fen-display");
@@ -379,8 +385,10 @@
     function analyze(fen) {
         state.currentRequestId++;
         state.analyzing = true;
-        state.pendingFen = fen;
+        state.pendingFen = fen;  // Store the FEN we're analyzing
         updateStatus("Thinking...", "thinking");
+
+        console.log('📤 Requesting analysis for:', fen.split(' ').slice(0, 2).join(' '));
 
         // Send FEN to background.js for WebSocket relay
         chrome.runtime.sendMessage({ 
@@ -407,15 +415,43 @@
         }
 
         const bestMove = data.bestmove;
-        const currentFen = state.lastFen;
-
-        // Validate the move is for the current position
-        if (!validateMoveIntegrity(bestMove, currentFen)) {
+        
+        // Get the FEN that this result is for (from the server response)
+        const resultFen = data.fen;
+        
+        // Get the CURRENT board position
+        const currentBoardFen = extractFENFromDOM();
+        
+        // Compare position (first part) and turn (second part) only
+        // Ignore castling, en passant, and move counters for comparison
+        const getFenKey = (fen) => {
+            if (!fen) return null;
+            const parts = fen.split(' ');
+            return parts[0] + '|' + (parts[1] || 'w');
+        };
+        
+        const resultFenKey = getFenKey(resultFen);
+        const currentFenKey = getFenKey(currentBoardFen);
+        
+        // If the board has changed since we requested analysis, discard this result
+        if (resultFenKey && currentFenKey && resultFenKey !== currentFenKey) {
+            console.log('⚠️ Stale analysis result - board has changed. Ignoring.');
+            console.log('   Result was for:', resultFenKey);
+            console.log('   Current board:', currentFenKey);
+            // Don't show error, just wait for the next analysis
+            return;
+        }
+        
+        // Validate the move makes sense for the current position
+        const fenToValidate = currentBoardFen || resultFen || state.lastFen;
+        if (!validateMoveIntegrity(bestMove, fenToValidate)) {
+            console.log('⚠️ Move validation failed:', bestMove, 'for FEN:', fenToValidate);
             updateStatus("Eval Error", "error");
             return;
         }
 
         // Update UI with best move
+        console.log('✅ Valid move received:', bestMove);
         document.getElementById("sf-best").innerText = bestMove || '-';
         
         if (data.score) {
@@ -429,7 +465,8 @@
 
         // Execute auto-move if enabled
         if (state.autoMove && bestMove) {
-            const fen = extractFENFromDOM() || state.lastFen;
+            // Use current board FEN for turn check
+            const fen = currentBoardFen || state.lastFen;
             if (isMyTurn(fen)) {
                 const randomDelay = Math.floor(
                     Math.random() * (CONFIG.MAX_DELAY - CONFIG.MIN_DELAY + 1) + CONFIG.MIN_DELAY
@@ -437,11 +474,17 @@
                 updateStatus(`Move in ${(randomDelay/1000).toFixed(1)}s`, "thinking");
                 
                 setTimeout(() => {
-                    // Re-check it's still our turn before moving
-                    const currentFen = extractFENFromDOM();
-                    if (currentFen && isMyTurn(currentFen)) {
+                    // Re-check the board position before moving
+                    const checkFen = extractFENFromDOM();
+                    const checkFenKey = getFenKey(checkFen);
+                    
+                    // Only move if the board is still in the same position
+                    if (checkFenKey === resultFenKey && isMyTurn(checkFen)) {
                         makeMove(bestMove);
                         updateStatus("Move Sent!", "ready");
+                    } else {
+                        console.log('⚠️ Board changed before auto-move. Cancelled.');
+                        updateStatus("Position Changed", "idle");
                     }
                 }, randomDelay);
             }
@@ -449,27 +492,73 @@
     }
 
     function validateMoveIntegrity(move, fen) {
-        if (!move || move.length < 4) return false;
-        const fenBoard = fen.split(' ')[0];
+        if (!move || move.length < 4) {
+            console.log('❌ Invalid move format:', move);
+            return false;
+        }
+        if (!fen) {
+            console.log('❌ No FEN to validate against');
+            return false;
+        }
+        
+        const fenParts = fen.split(' ');
+        const fenBoard = fenParts[0];
+        const turn = fenParts[1] || 'w';
+        
+        if (!fenBoard) {
+            console.log('❌ Invalid FEN board:', fen);
+            return false;
+        }
+        
         const rows = fenBoard.split('/');
+        if (rows.length !== 8) {
+            console.log('❌ Invalid FEN rows:', rows.length);
+            return false;
+        }
+        
         const fileMap = {'a':0,'b':1,'c':2,'d':3,'e':4,'f':5,'g':6,'h':7};
         const fromFile = fileMap[move[0]];
         const fromRank = 8 - parseInt(move[1]);
         
+        if (fromFile === undefined || fromRank < 0 || fromRank > 7) {
+            console.log('❌ Invalid move coordinates:', move);
+            return false;
+        }
+        
+        // Expand the row to get individual squares
         let boardRow = [];
-        for (let char of rows[fromRank]) {
+        const rowStr = rows[fromRank];
+        if (!rowStr) {
+            console.log('❌ Invalid row index:', fromRank);
+            return false;
+        }
+        
+        for (let char of rowStr) {
             if (/\d/.test(char)) {
-                for (let k=0; k<parseInt(char); k++) boardRow.push('');
+                for (let k = 0; k < parseInt(char); k++) boardRow.push('');
             } else {
                 boardRow.push(char);
             }
         }
+        
         const piece = boardRow[fromFile];
-        const turn = fen.split(' ')[1];
-        if (!piece) return false;
+        
+        if (!piece) {
+            console.log('❌ No piece at source square:', move[0] + move[1]);
+            return false;
+        }
+        
         const isWhitePiece = piece === piece.toUpperCase();
-        if (turn === 'w' && !isWhitePiece) return false;
-        if (turn === 'b' && isWhitePiece) return false;
+        
+        if (turn === 'w' && !isWhitePiece) {
+            console.log('❌ Wrong color piece (expected white):', piece, 'at', move[0] + move[1]);
+            return false;
+        }
+        if (turn === 'b' && isWhitePiece) {
+            console.log('❌ Wrong color piece (expected black):', piece, 'at', move[0] + move[1]);
+            return false;
+        }
+        
         return true;
     }
 
