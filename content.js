@@ -11,7 +11,7 @@
     };
 
     let state = {
-        lastFen: null,
+        lastFenKey: null,
         analyzing: false,
         autoMove: false,
         enabled: true,
@@ -180,11 +180,20 @@
         return null;
     }
 
+    // Create a unique key from FEN using position and turn only
+    // Ignores castling, en passant, and move counters for comparison
+    function getFenKey(fen) {
+        if (!fen) return null;
+        const parts = fen.split(' ');
+        return parts[0] + '|' + (parts[1] || 'w');
+    }
+
     function isMyTurn(fen) {
         const myColor = getMyColor();
         const currentTurn = getTurnFromFen(fen);
         return currentTurn === myColor;
     }
+
 
     // ========== 4. VISUAL SCRAPER ==========
     function extractFENFromDOM() {
@@ -349,14 +358,14 @@
     function handleFen(fen) {
         if (!fen) return;
         
-        // Create a key from position and turn only
-        const cleanFen = fen.split(' ').slice(0, 2).join(' ');
+        // Create a key from position and turn only using utility function
+        const fenKey = getFenKey(fen);
         
         // Skip if same position
-        if (cleanFen === state.lastFen) return;
+        if (fenKey === state.lastFenKey) return;
         
-        console.log('📥 New position detected:', cleanFen);
-        state.lastFen = cleanFen;
+        console.log('📥 New position detected:', fenKey);
+        state.lastFenKey = fenKey;
 
         const fenDisplay = document.getElementById("sf-fen-display");
         if (fenDisplay) fenDisplay.innerText = fen;
@@ -422,14 +431,7 @@
         // Get the CURRENT board position
         const currentBoardFen = extractFENFromDOM();
         
-        // Compare position (first part) and turn (second part) only
-        // Ignore castling, en passant, and move counters for comparison
-        const getFenKey = (fen) => {
-            if (!fen) return null;
-            const parts = fen.split(' ');
-            return parts[0] + '|' + (parts[1] || 'w');
-        };
-        
+        // Use the utility function to create comparable keys
         const resultFenKey = getFenKey(resultFen);
         const currentFenKey = getFenKey(currentBoardFen);
         
@@ -443,8 +445,9 @@
         }
         
         // Validate the move makes sense for the current position
-        const fenToValidate = currentBoardFen || resultFen || state.lastFen;
-        if (!validateMoveIntegrity(bestMove, fenToValidate)) {
+        // Use current board FEN if available, otherwise use the result FEN
+        const fenToValidate = currentBoardFen || resultFen;
+        if (!fenToValidate || !validateMoveIntegrity(bestMove, fenToValidate)) {
             console.log('⚠️ Move validation failed:', bestMove, 'for FEN:', fenToValidate);
             updateStatus("Eval Error", "error");
             return;
@@ -466,8 +469,8 @@
         // Execute auto-move if enabled
         if (state.autoMove && bestMove) {
             // Use current board FEN for turn check
-            const fen = currentBoardFen || state.lastFen;
-            if (isMyTurn(fen)) {
+            const fen = currentBoardFen || resultFen;
+            if (fen && isMyTurn(fen)) {
                 const randomDelay = Math.floor(
                     Math.random() * (CONFIG.MAX_DELAY - CONFIG.MIN_DELAY + 1) + CONFIG.MIN_DELAY
                 );
@@ -518,7 +521,7 @@
         
         const fileMap = {'a':0,'b':1,'c':2,'d':3,'e':4,'f':5,'g':6,'h':7};
         const fromFile = fileMap[move[0]];
-        const fromRank = 8 - parseInt(move[1]);
+        const fromRank = 8 - parseInt(move[1], 10);
         
         if (fromFile === undefined || fromRank < 0 || fromRank > 7) {
             console.log('❌ Invalid move coordinates:', move);
@@ -535,7 +538,7 @@
         
         for (let char of rowStr) {
             if (/\d/.test(char)) {
-                for (let k = 0; k < parseInt(char); k++) boardRow.push('');
+                for (let k = 0; k < parseInt(char, 10); k++) boardRow.push('');
             } else {
                 boardRow.push(char);
             }
