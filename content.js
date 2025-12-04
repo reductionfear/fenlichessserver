@@ -25,6 +25,9 @@
         (function() {
             const _origWebSocket = window.WebSocket;
             
+            // Store the active game WebSocket for sending moves
+            window.__LICHESS_WS__ = null;
+            
             function partialFenToFull(payload) {
                 const fenBase = payload.fen;
                 const ply = payload.ply;
@@ -53,6 +56,12 @@
             window.WebSocket = function(...args) {
                 const socket = new _origWebSocket(...args);
                 
+                // Store reference to the Lichess game WebSocket
+                if (args[0] && (args[0].includes('lichess.org') || args[0].includes('socket.'))) {
+                    window.__LICHESS_WS__ = socket;
+                    console.log('🔌 Captured Lichess WebSocket');
+                }
+                
                 socket.addEventListener('message', (event) => {
                     try {
                         const msg = JSON.parse(event.data);
@@ -73,6 +82,31 @@
             window.WebSocket.OPEN = _origWebSocket.OPEN;
             window.WebSocket.CLOSING = _origWebSocket.CLOSING;
             window.WebSocket.CLOSED = _origWebSocket.CLOSED;
+            
+            // Listen for move requests from content script (CSP-safe)
+            // Guard to prevent duplicate listener registration
+            if (!window.__LICHESS_MOVE_LISTENER__) {
+                window.__LICHESS_MOVE_LISTENER__ = true;
+                window.addEventListener('__LICHESS_MAKE_MOVE__', function(e) {
+                    const uciMove = e.detail?.move;
+                    if (!uciMove) {
+                        console.error('❌ No move in event');
+                        return;
+                    }
+                    
+                    if (window.__LICHESS_WS__ && window.__LICHESS_WS__.readyState === WebSocket.OPEN) {
+                        window.__LICHESS_WS__.send(JSON.stringify({
+                            t: "move",
+                            d: { u: uciMove, b: 1, l: 10000, a: 1 }
+                        }));
+                        console.log('📤 Sent move via WebSocket:', uciMove);
+                    } else {
+                        console.error('❌ WebSocket not available or not open');
+                    }
+                });
+            }
+            
+            console.log('✅ Lichess WebSocket hooks installed');
         })();
         `;
         (document.head || document.documentElement).appendChild(script);
@@ -302,19 +336,11 @@
         
         console.log('🎯 Executing move:', uciMove);
         
-        // Send move via WebSocket (injected into page context)
-        const script = document.createElement('script');
-        script.textContent = `
-            (function() {
-                if (window.__SEND_MOVE__) {
-                    window.__SEND_MOVE__('${uciMove}');
-                } else {
-                    console.error('❌ __SEND_MOVE__ not available');
-                }
-            })();
-        `;
-        document.head.appendChild(script);
-        script.remove();
+        // Dispatch custom event to page context (CSP-safe, no inline script)
+        // The mainListener.js running in MAIN world will receive this event
+        window.dispatchEvent(new CustomEvent('__LICHESS_MAKE_MOVE__', {
+            detail: { move: uciMove }
+        }));
         
         return true;
     }
