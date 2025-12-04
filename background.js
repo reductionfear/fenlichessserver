@@ -1,4 +1,4 @@
-const WS_URL = "ws://localhost:8085";
+const WS_URL = "ws://127.0.0.1:8085";
 const DEFAULT_DEPTH = 16;
 
 let ws = null;

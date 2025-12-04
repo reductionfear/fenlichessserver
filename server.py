@@ -442,6 +442,7 @@ if __name__ == '__main__':
     # Start WebSocket server in main asyncio loop
     ws_server = WebSocketServer(engine)
     loop = asyncio.get_event_loop()
-    loop.run_until_complete(ws_server.start())
+    start_server = ws_server.start()
+    loop.run_until_complete(start_server)
     print("✅ WebSocket server started on ws://127.0.0.1:8085")
     loop.run_forever()

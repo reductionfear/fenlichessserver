@@ -368,7 +368,7 @@
     function handleAnalysisResult(data) {
         state.analyzing = false;
         
-        if (!data.success || !data.bestmove) {
+        if (!data.success || data.bestmove === null || data.bestmove === undefined) {
             updateStatus("Offline", "offline");
             return;
         }
